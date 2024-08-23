@@ -1,0 +1,88 @@
+global class UpdatePipelineDateBatch implements Database.Batchable<SObject>, Database.Stateful {
+    public Integer successRecs = 0;
+    public Integer errorRecs = 0;
+    public String errorMessage ='';
+    global Database.QueryLocator start(Database.BatchableContext BC)
+    {
+        String query = System.label.UpdatePipelineDateBatchQuery;
+        return Database.getQueryLocator(query);
+    }
+    global void execute(Database.BatchableContext BC, List<Opportunity> scope)
+    {
+        Map<Id,Opportunity> oppMap = new map<Id,Opportunity>();
+        set<id> noHistory =new set<id>();
+        set<id> isHistory =new set<id>();
+    //store the all opportunities to map and set for future reference
+        for (Opportunity opp : scope) {
+            oppMap.put(opp.Id,opp);
+            noHistory.add(opp.id);
+        }
+      // get the stage histories for opportunity in map its ordered by OpportunityId and createddate with desc
+        List<OpportunityFieldHistory> historyRecords = [
+            SELECT OpportunityId, CreatedDate, Field, OldValue, NewValue
+            FROM OpportunityFieldHistory
+            WHERE OpportunityId IN :oppMap.keySet()
+            AND Field = 'StageName'
+            ORDER BY OpportunityId , CreatedDate desc
+        ];
+        Date changeFromDiscovery;
+        Date startFromOther;
+        id previwsOppid;
+        for(OpportunityFieldHistory history : historyRecords)
+        {
+            if(previwsOppid==null){
+                previwsOppid=history.OpportunityId;
+            }
+            if(previwsOppid != history.OpportunityId){
+                previwsOppid=history.OpportunityId;
+                changeFromDiscovery=null;
+                startFromOther=null;
+            }
+            // this set collect the opportunity ids of which opportunies are have stage history
+            isHistory.add(history.OpportunityId);
+            // update the date of opp history created date to temprory date variable its runs only one time for every opportunity
+            if(oppMap.get(history.OpportunityId).StageName !='Discovery' && history.OldValue == 'Discovery' && changeFromDiscovery==null)
+            {
+                changeFromDiscovery=history.CreatedDate.date();
+            }
+            //update the date of opportunity created date to temprory date variable its run continue upto most last history createddate
+            if(oppMap.get(history.OpportunityId) .StageName !='Discovery' && history.OldValue != 'Discovery'&&  changeFromDiscovery==null )
+            {
+                startFromOther=oppMap.get(history.OpportunityId).createddate.date();
+                system.debug('startfrom Other==='+oppMap.get(history.OpportunityId).id);
+            }
+            if(changeFromDiscovery!=null){
+                oppMap.get(history.OpportunityId).Pipeline_Date__c=changeFromDiscovery;
+            }
+            else if(startFromOther != null){
+                oppMap.get(history.OpportunityId).Pipeline_Date__c=startFromOther;
+            }
+        }
+        noHistory.removeAll(isHistory);
+        system.debug(noHistory);
+        // update the date of opportunity created date to non history opportunities
+        List<Opportunity> noHistoryOpp =new List<Opportunity>([select id,createddate from Opportunity where id IN:noHistory and StageName!='Discovery']);
+        for(Opportunity NoHisOpps:noHistoryOpp){
+            oppMap.get(NoHisOpps.id).Pipeline_Date__c= oppMap.get(NoHisOpps.id).createddate.date();
+        }
+        Database.SaveResult[] results = Database.update(oppMap.values(),false);
+        for (Database.SaveResult SR : results) {
+            if (!SR.isSuccess()) {
+                errorRecs +=1;
+                errorMessage +=SR.getErrors()[0].getMessage()+'\n';
+            }else{
+                successRecs +=1;
+            }
+        }
+    }
+    global void finish(Database.BatchableContext BC) {
+        System.debug('"UpdatePipelineDateBatch"Batch process completed.');
+    }
+}
+
+
+
+
+
+
+
