@@ -1,0 +1,82 @@
+public class UnusedMethodChecker {
+   public static void getMethodNames(String className) {
+        // Retrieve the class body from ApexClass object
+        List<ApexClass> apexClassList = [SELECT Body FROM ApexClass WHERE Name = :className LIMIT 1];
+        
+        if (apexClassList.isEmpty()) {
+            System.debug('Class not found: ' + className);
+            
+        }
+        
+        String classBody = apexClassList[0].Body;
+        
+        // Extract method names
+        List<String> methodNames = extractMethodNames(classBody);
+        
+        if (methodNames.isEmpty()) {
+            System.debug('No methods found in class: ' + className);
+        }
+        system.debug('ClassNames = '+className);
+        system.debug('MethodNames = '+methodNames);
+
+		// Check for method usage in all Apex classes and triggers
+        Map<String, Boolean> methodUsage = new Map<String, Boolean>();
+        for (String methodName : methodNames) {
+            methodUsage.put(methodName, false);
+        }
+       
+       // Search in Apex classes
+        List<ApexClass> allApexClasses = [SELECT Body FROM ApexClass WHERE Id != :apexClassList[0].Id  and  NamespacePrefix =null ];
+        for (ApexClass apexClass : allApexClasses) {
+            String otherClassBody = apexClass.Body;
+            for (String methodName : methodNames) {
+                if (otherClassBody.contains(methodName + '(')) {
+                    methodUsage.put(methodName, true);
+                }
+            }
+        }
+       
+       
+       
+        // Search in Apex triggers
+        List<ApexTrigger> allApexTriggers = [SELECT Body FROM ApexTrigger];
+        for (ApexTrigger apexTrigger : allApexTriggers) {
+            String triggerBody = apexTrigger.Body;
+            for (String methodName : methodNames) {
+                if (triggerBody.contains(methodName + '(')) {
+                    methodUsage.put(methodName, true);
+                }
+            }
+        }
+       
+       // Output unused methods
+        for (String methodName : methodUsage.keySet()) {
+            if (!methodUsage.get(methodName)) {
+                System.debug('Unused Method: ' + methodName);
+            }
+        }
+       
+
+
+
+    }
+    
+    
+    private static List<String> extractMethodNames(String classBody) {
+        List<String> methodNames = new List<String>();
+        
+        // Regular expression pattern to match method declarations
+        Pattern methodPattern = Pattern.compile('\\b(?:public|private|protected|global|static)\\s+\\b(?:void|\\w+)\\s+(\\w+)\\s*\\(');
+        Matcher methodMatcher = methodPattern.matcher(classBody);
+        
+        while (methodMatcher.find()) {
+            methodNames.add(methodMatcher.group(1));
+        }
+        
+        return methodNames;
+    }
+    
+    
+    
+
+}
